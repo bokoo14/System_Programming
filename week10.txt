@@ -1,0 +1,309 @@
+# 10장 1108 강의 요약
+## sort
+a.txt
+sort < a.txt
+a.txt파일을 sort명령어의 input으로 넣음
+
+ls -al > b.txt
+ls -al 의 결과를 b.txt파일에 저장
+
+ls -al /usr/include/ | more
+ls -al | more
+ls -al의 결과를 두번째 명령어인 more의 input으로
+more: page단위로 보기
+
+### a.c
+#include <stdio.h>
+int main(){
+  char buf1[100];
+  while (gets(buf1)!=NULL){
+    printf("[kyung] %s \n", buf1);
+  }
+}
+
+### bash shell
+gcc a.c -o a.out
+./a.out
+
+ls | ./a.out
+2개의 프로세스가 생김
+ls의 output을 a.out의 input으로 넣어라
+
+ls | sort
+| : pipe
+
+-----------------------------------------------------------------
+## pipe
+독립된 프로세스들의 데이터를 주고 받을 수 있도록 함
+
+윈도우에는 수십개의 프로세스들이 돌고 있다
+프로세스가 어떻게 생성되었을까
+fork가 되어서 새로운 프로세스가 생기고
+fork라는 시스템 콜을 통해 수십개의 프로세스가 생김
+fork로 프로세스가 생성
+
+fork를 통해 프로세스를 만들 수 있음
+데이터를 어떻게 주고 받을 수 있을까?
+
+공통된 파일을 하나 만들어놓고 이 파일을 읽고 쓰면 되지 않을까?
+파일이 업데이트되는 시점과 읽는 시점이 다를 수도 있음-> 안됨
+
+pipe를 통해 제공
+다른 프로세스가 읽을 수 있도록 
+
+
+###  ftest.c
+// fork를 이용하여 프로세스 2개를 만들고 읽고 쓸 수 있게 하기
+#include <stdio.h>
+#include <fcntl.h>
+
+int main(){
+  int fd, pid;
+  char buf[100];
+  fd=open("test.txt", O_RDWR | O_CREAT, 0666); //파일 열기
+  printf("fd = %d \n", fd); //3이 출력
+
+  pid = fork();
+  if (pid ==0){ // child process
+    strcpy(buf, “This is a child \n”);
+    write(fd, buf, strlen(buf)+1); // fd에 쓰기
+  }
+  else{ // parent process
+    sleep(2);
+    read(fd, buf, 100); // fd의 내용 읽기
+    printf(“buf = 5s \n”, buf);
+  }
+}
+
+
+### pipetest.c
+#include <stdio.h>
+#include <fcntl.h>
+
+int main(){
+  int pid, result;
+  int fd[2];
+  char buf[100];
+
+  result = pipe(fd);
+  printf("result = %d, fd[0]= %d , fd[1] = %d \n", result ,fd[0], fd[1]); //3 4 가 출력
+}
+
+3과 4사이에 통로가 생겨서 읽을 수 있다
+pipe는 한쪽으로만 쓰고 읽을 수 있음
+
+서로 데이터를 주고 받으려면? pipe를 두개를 만들어서 사용
+두 개의 프로세스가 데이터를 주고 받을 수 있음
+
+
+### pipetest.2c
+#include <stdio.h>
+#include <fcntl.h>
+
+int main(){
+  int pid, result;
+  int fd[2];
+  char buf[100];
+
+result = pipe(fd);
+printf("result = %d, fd[0]= %d , fd[1] = %d \n", result ,fd[0], fd[1]); //3 4 가 출력
+pid = fork();
+if (pid ==0){ // child process -> fd[0]에서 읽기만
+  close(fd[1]);
+  read(fd[0], buf, 100);
+  printf("child process: %s \n", buff);
+}
+else{ // parent process -> fd[1]에서 쓰기만
+  close(fd[0]);
+  strcpy(buf, "hello");
+  write(fd[1], buf, strlen(buf)+1);
+  wait(pid); //child가 끝날때까지 기다림
+}
+}
+
+pipe는 한반향으로만 보낼 수 있음
+데이터는 순서대로 쌓임 -> fifo
+
+### pipetest3.c
+#include <stdio.h>
+#include <fcntl.h>
+#include <string.h>
+
+int main(){
+  int pid, result1, result2;
+  int data;
+  int fd1[2];
+  int fd2[2];
+  char buf[100];
+
+  result1 = pipe(fd1);
+  result2 = pipe(fd2);
+  printf("result1 = %d, fd1[0]= %d , fd1[1] = %d \n", result1 ,fd1[0], fd1[1]);
+  printf("result2 = %d, fd2[0]= %d , fd2[1] = %d \n", result2 ,fd2[0], fd2[1]);
+
+  pid = fork(); // 두 개의 프로세스
+
+  //하나는 쓰기만 하고 하나는 읽기만 하기
+  if (pid ==0){ // child process -> 읽기만 수행
+    close(fd1[1]); // parent와 반대에 해당하는걸 잠근다
+    read(fd1[0], buf, 100);
+    printf("CHILD : %s \n", buf);
+
+    read(fd1[0], buf, 100);
+    printf("CHILD2 : %s \n", buf);
+
+    data = 30;
+    read(fd1[0], &data, sizeof(int));
+    printf("CHILD data = %d\n", data);
+  }
+  else{ // parent process -> 쓰기만 수행
+    close(fd1[0]); // child와 반대에 해당하는걸 잠근다
+   strcpy(buf, "hello child.");
+   //sleep(2);
+   write(fd1[1], buf, strlen(buf)+1);
+
+    strcpy(buf, "hi child.");
+    //sleep(2);
+    write(fd1[1], buf, strlen(buf)+1);
+
+    data=20;
+    write(fd1[1], &data, sizeof(int));
+    //wait(pid);
+  }
+}
+
+----------------------------------------------------------------------------------------------------------
+## named pipe
+### bash shell
+mkfifo fifo1 
+fifo1은 일반 파일은 아니고 p타입(pipe형식)
+두 개의 프로세스가 pipe를 통해서 read, write할 수 있음
+named pipe
+
+mkfifo /tmp/fifo1 
+tmp밑에 fifo1을 생성
+
+
+### fifowrite.c
+// fifo에 쓰기
+#include <stdio.h>
+#include <fcntl.h>
+#include <string.h>
+
+int main(){
+  char msg[100];
+  int fd;
+  int nread;
+  fd = open("fifo1", O_WRONLY); //write only로 설정하여 write만 하도록 설정
+  printf("fd in WRITER= %d \n", fd); //3이 출력
+
+  printf("Enter a string to send : ");
+  gets(msg); //키보드로 입력을 받음
+  nread = write(fd, msg, strlen(msg)+1); 
+  //nread = write(fd, msg, sizeof(char)*100+1); 
+
+  sleep(2);
+  printf("nread = %d \n", nread);
+  write(fd, &nread, sizeof(int)); // int주고 받기
+}
+
+
+### fiforead.c
+// fifo 읽기
+#include <stdio.h>
+#include <fcntl.h>
+
+int main(){
+  char msg[100];
+  int fd, nread, data;
+
+  fd = open("fifo1", O_RDWR); // read mode
+  printf("fd in READER = %d \n", fd);
+  nread = read(fd, msg, 100);
+  printf("READER : %s \n", msg);
+
+  nread = read(fd, &data, sizeof(int)); // int 읽기
+  printf("READER data = %d \n", data);
+}
+----------------------------------------------------------------------------------------------------------
+## 실습
+(1) named pipe 이용한 메시지 전달하기
+  - program A
+   + 키보드로 입력받은 문자열을 program B에 전달하고, program B가 보내는 문자열을 기다린다. 
+   + 만든 문자열을 출력한다. 
+   + 이 과정을 "end"를 입력할 때까지 반복한다. 
+  - program B
+   + program A로부터 문자열을 기다린다.
+   + 받은 문자열을 출력하고, 새로운 문자열을 만든다. ("예: strcat을 사용해서 msg + "이름")
+   + 새로 만든 문자열을 program A에게 전송한다. 
+   + 이 과정을 program A가 "end"를 받을 때까지 반복한다. 
+
+(2) 제출물 
+  - 두 개의 프로그램 소스 코드
+  - 실행화면 캡쳐한 이미지 파일
+
+
+### A.c
+#include <stdio.h>
+#include <fcntl.h>
+#include <string.h>
+#include <unistd.h>
+#include <stdlib.h>
+
+//program A
+int main(){
+	char msg[100];
+	int fd1, fd2, nread;
+	
+	fd1 = open("fifo1", O_WRONLY); // 쓰기
+	fd2 = open("fifo2", O_RDWR); // 읽기
+	
+	while(1){
+		// 쓰기
+		printf("fd in WRITER= %d \n", fd1);
+		printf("Enter a string to send : ");
+		gets(msg);
+
+		write(fd1, msg, strlen(msg)+1);
+		
+		//fflush(msg);
+		
+		// 읽기
+		printf("fd2 in READER = %d \n", fd2);
+		nread = read(fd2, msg, 100);
+		printf("result is .. : %s \n", msg);
+
+		if (!strcmp(msg, "end")){exit(0);}
+	}
+
+}
+
+
+### B.c
+#include <stdio.h>
+#include <fcntl.h>
+#include <string.h>
+#include <unistd.h>
+#include <stdlib.h>
+
+// program B
+int main(){
+	char msg[100];
+	int fd1, fd2, nread;
+	
+	fd1 = open("fifo1", O_RDWR); //읽기
+	fd2 = open("fifo2", O_WRONLY); //쓰기
+	
+	while(1){
+		// 읽기
+		printf("fd1 in READER = %d \n", fd1);
+		nread = read(fd1, msg, 100);
+		printf("READER : %s \n", msg);
+	
+		strcat(msg, "bokyung");
+		
+        // 쓰기
+		write(fd2, msg, strlen(msg)+1);
+		if (!strcmp(msg, "endbokyung")){exit(0);}
+	}
+}

@@ -1,0 +1,497 @@
+# 9주차 1101 강의 요약
+
+## 프로그램이란 무엇인가?
+프로그램: 내가 원하는 기능을 하는 명령어의 집합
+제대로 컴파일을 하면 임의의 실행 프로그램이 나옴
+
+gcc a.c -o a.out
+내가 실행하기 전까지는 파일로 존재
+./a.out을 수행하면 그 프로그램이 수행된다
+
+os는 프로세스를 관리하는게 중요하다
+프로그램: 명령어의 집합. 실행 전
+프로세스: 실행중인 프로그램
+프로세서: cpu
+
+ls: 디렉토리에 존재하는 파일 보여줌
+ps: 현재 터미널에서 실행중인 프로세스의 리스트
+ps aux: 현재 os에서 돌고 있는 모든 프로세스의 리스트
+시스템에 동작 중인 모든 프로세스를 소유자 정보와 함께 다양한 정보 출력
+aux: 프로세스 현황 표시, 유저지향,  터미널 제어 없이 프로세스 현황 보기
+
+## shell
+shell: 명령어를 이해하고 실행시켜주는 것
+명령어를 이해하고 a.out을 실행시키는 프로세스를 만든다
+끝날때까지 기다렸다가 자신의 shell프로그램을 수행할 수 있다
+bash shell을 기본적으로 쓰고 있음
+shell에서도 간단한 프로그램을 짤 수 있다
+shell programming: 쉘에서 제공하는 프로그래밍 언어로 간단한 프로그램을 짤 수 있다
+
+vi /etc/passwd :내 아이디들을 보여줌
+
+ps aux | grep kyung : kyung라는 아이디로 돌고 있는 프로세스 리스트 확인
+
+--------------------------------------------------------------------------------------
+## execvp()
+how does a program run a program?: the program invokes execvp()
+한 프로그램에서 다른 프로그램을 실행할 수 있음
+
+purpose: execute a file, with path searching
+include: #include <unistd.h>
+usage: result=execvp(const char * file, const char * argv[])
+args: file name of file to execute
+      argv array of strings
+returns: -1 if error
+
+### exec1.c 
+// ls -l을 실행하는 프로그램. 프로그램 내에서 ls -l이라는 명령어를 수행
+#include <stdio.h>
+#include <unistd.h>
+
+int main(){
+        char* arglist[3];
+        arglist[0]="ls";
+        arglist[1]="-l";
+        arglist[1]="NULL";
+        
+        execvp("ls", arglist);
+        printf("*** ls is done \n");
+
+}
+
+
+### bash shell
+exec1 실행 -> ls -l이라는 명령어가 실행이 됨
+gcc exec1.c -o exec1
+./exec1
+
+### exec2.c 
+// ./a.out을 실행하는 프로그램. 프로그램 내에서 ./a.out이라는 명령어를 수행
+#include <stdio.h>
+#include <unistd.h>
+
+int main(){
+        char* arglist[3];
+        arglist[0]="./a.out";
+        arglist[1]="NULL";
+
+        execvp("./a.out", arglist);
+        printf("*** ./a.out is done \n");
+
+}
+
+### bash shell
+exec2 실행 -> a.out이라는 파일을 실행시켜줌
+gcc exec2.c -o exec2
+./exec2
+
+
+### a.c
+#include <stdio.h>
+
+int main(){
+        int i;
+        printf("Hello \n");
+        printf("my pid = %d \n", getpid()); //내 pid를 출력 -> 1560 
+        
+        for(i=0; i<20; i++){
+        sleep(2);
+        printf("Hello \n");
+        }
+}
+
+### exec3.c
+#include <stdio.h>
+#include <unistd.h>
+
+int main(){
+        char* arglist[3];
+        arglist[0]="./a.out";
+        arglist[1]="NULL";
+        
+        printf("my pid = %d \n", getpid()); //내 pid를 출력 -> 1560
+        sleep(1);
+        execvp("./a.out", arglist);
+        printf("*** ./a.out is done \n"); //출력이 안되고 끝남 
+
+}
+
+### bash shell
+exec3 실행 -> a.out이라는 파일을 실행시켜줌
+gcc exec3.c -o exec3
+./exec3
+둘 다 동일한 pid를 출력
+왜? execvp(const char * file, const char * argv[])를 실행하면 새로운 프로세스를 생성하지 않고 현재 실행 중인 프로그램을 버리고 새로운 프로그램인 a.out이라는 실행 파일을 load해주고 a.out을 처음부터 실행시킴
+새로운 프로세스를 생성하지 않고 기존에 있던 프로세스를 사용
+
+
+### psh1.c
+// 입력을 통해 명령어 실행
+// 임의의 프로그램을 실행시켜주는 하나의 프로그램
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <string.h>
+#include <unistd.h>
+
+#define MAXARGS 20
+#define ARGLEN 100
+
+int execute(char * arglist[]){
+	execvp(arglist[0], arglist);
+	perror("execvp failed");
+	if (arglist!=NULL) free(arglist);
+	exit(1);
+}
+
+char * makestring(char * buf){
+	char* cp;
+	buf[strlen(buf)-1] = '\0';
+	cp = malloc(strlen(buf)+1);
+	if (cp==NULL){
+		fprintf(stderr, "no memory\n");
+		exit(1);
+	}
+	strcpy(cp, buf);
+	return cp;
+}
+
+int main(int argc, char * argv[]){
+	char * arglist[MAXARGS+1];
+	int numargs;
+	char argbuf[ARGLEN];
+	char * makestring();
+	numargs=0;
+	
+	while (numargs<MAXARGS){
+		printf("Arg[%d]?", numargs);
+		if (fgets(argbuf, ARGLEN, stdin)&& *argbuf!='\n'){
+			arglist[numargs++]= makestring(argbuf);
+		}
+		else{
+			if (numargs>0){
+				arglist[numargs]=NULL;
+				execute(arglist);
+				numargs=0;
+			}
+		}
+	}
+	return 0;
+}
+
+### bash shell
+gcc psh1.c -o psh1
+./psh1
+Argc[0]? ls
+Argc[1]? -l
+Argc[2]? demodir
+Argc[3]? 
+
+### psh1.c 
+// psh1.c 간략한 코드
+// 입력을 통해 명령어 실행
+// 임의의 프로그램을 실행시켜주는 하나의 프로그램
+#include <stdio.h>
+#include <unistd.h>
+#include <string.h>
+
+int main ()
+{
+	char *arglist[10];
+	char buf[100];
+	int i;
+	i = 0;
+	while (i < 10) {
+		printf ("Arg[%d]? ", i);
+		gets (buf);
+		arglist[i] = (char*) malloc (strlen(buf) + 1);
+		strcpy (arglist[i], buf);
+		if (strcmp (arglist[i], "") == 0) {
+			arglist[i] = NULL;
+			break;
+		}
+		i++;
+	}
+	execvp (arglist[0], arglist);
+}
+
+### execv
+내가 실행하고 있는 코드가 있을 때 execv를 수행하면 다른 코드를 load해서 실행
+새로운 프로세스를 실행하는 것은 아님
+
+--------------------------------------------------------------------------------------
+## fork
+how do we get a new process?: a process calls fork to replicate itself
+System call: fork() // takes no argument
+새로운 프로세스 생성하기
+
+purpose: create a process
+include: #include <unistd.h>
+usage: pid_t result=fork(void)
+args: none
+returns: -1 if error
+         0 when child process
+         pid pid of child when parent process
+
+
+### forkdemo1.c
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+
+int main (){
+	int result, mypid;
+	
+	mypid = getpid();
+	printf("my pid = %d \n", mypid); // 내 pid 출력
+    
+	result = fork();
+	sleep(1);
+    
+	mypid = getpid();
+	printf("After fork: ");
+	printf("my pid = %d \n", mypid); // 두 번이 실행
+	
+}
+
+
+### bash shell
+gcc forkdemo1.c -o forkdemo1
+./forkdemo1
+
+
+fork()를 실행하면 프로세스를 생성해준다
+메모리 어딘가에 올라와 있어서 이 중에 fork라는 시스템 콜을 호출하면 프로세스를 생성해준다
+리눅스에서 하나의 새로운 프로세스를 생성해주는 것
+
+그 프로세서는 어떤 프로그램을 실행해주나? fork 뒤부터 실행해준다
+fork 이후에는 두개의 독립된 프로그램을 실행해준다
+
+fork()가 1개 -> 2개 프로세스
+fork()가 2개 -> 4개 프로세스
+fork()가 3개 -> 8개 프로세스
+fork()가 n개 -> 2^n개 프로세스
+
+### forkdemo2.c
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+
+int main (){
+	int result, mypid;
+	
+	mypid = getpid();
+	printf("my pid = %d \n", mypid); // 내 pid 출력
+    
+	result = fork(); //fork 이후 두 번이 실행
+	sleep(1);
+    
+	mypid = getpid();
+	printf("After fork: ");
+	printf("my pid = %d \n", mypid); // 내 pid 출력
+    printf("result= %d\n", result);
+}
+
+두 개의 프로세스가 생기지만 return값이 다르다
+fork를 호출한 프로세스 : parent 프로세스
+fork로 인해 생긴 프로세스 : child 프로세스
+
+parent와 child는 return 값으로 구분
+return값이 0이면? child 프로세스
+return값이 0이 아니면? child 프로세스
+
+--------------------------------------------------------------------------------------
+## Summary
+buliding a shell using fork, execvp, wait
+how to create a new process: fork()
+how to run a program: execvp()
+how to tell the parent to wait until the child process finishes executing the commad: wait()
+wait(): to be discussed next
+
+--------------------------------------------------------------------------------------
+## wait: how does parent wait for the child to exit?
+answer: a process calls wait() to wait for a child to finish
+child프로세스가 끝날때까지 기다리는 함수
+
+usage: pid = wait(&status)
+two things done by wait()
+pausing the parent process until a child process finishes running
+retrieving the value the child process had passed to exit
+
+
+쉘 프로그램은 child가 끝날때까지 기다림
+
+### forkdemo3.c
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+
+int main (){
+	int result, mypid;
+	
+	mypid = getpid();
+	printf("my pid = %d \n", mypid); // 내 pid 출력
+    
+	result = fork(); //fork 이후 두 번이 실행
+    
+    if (result==0){
+    //child process
+    sleep(3);
+    mypid=getpid();
+    printf("After fork: ");
+    printf("my pid = %d result = %d \n", mypid, result);
+    }
+    else{
+    //parnent process
+    wait(NULL);
+    printf("This is a parent process \n");
+    }
+}
+
+### bash shell
+gcc forkdemo3 -o forkdemo3
+./forkdemo3
+
+실행하면 wait(NULL)에 의해서 child 프로세스가 끝날때까지 기다림
+
+
+### psh2.c
+// 계속해서 여러 명령어를 수행하는 프로그램
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <signal.h>
+#include <sys/wait.h>
+
+#define MAXARGS 20
+#define ARGLEN 100
+
+void execute(char**);
+char * makestring();
+
+int main()
+{
+	char * arglist[MAXARGS+1];
+	int numargs;
+	char argbuf[ARGLEN];
+	
+	numargs = 0;
+	while (numargs<MAXARGS){
+		printf("Arg[%d]? ", numargs);
+		if(fgets(argbuf, ARGLEN, stdin)&& *argbuf!='\n'){
+			arglist[numargs++]=makestring(argbuf);
+		}
+		else{
+			if (numargs>0){
+				arglist[numargs]=NULL;
+				execute(arglist);
+				numargs=0;
+			}
+		}
+	}
+	return 0;
+}
+
+void execute (char * arglist[]){
+	int pid, exitstatus;
+	pid = fork();
+	switch(pid){
+		case -1:
+			perror("fork failed");
+			exit(1);
+		case 0: // child이면
+			execvp(arglist[0], arglist);
+			perror("execvp failed ");
+			exit(1);
+		default: // parent이면
+			while(wait(&exitstatus)!=pid);
+			printf("children exited with status %d, %d \n", exitstatus>>8, exitstatus&0377);
+	}
+}
+
+char * makestring(char *buf){
+	char *cp;
+	buf[strlen(buf)-1]= '\0';
+	cp = malloc(strlen(buf)+1);
+	if(cp == NULL){
+		fprintf(stderr, "no memory\n");
+		exit(1);
+	}
+	strcpy(cp, buf);
+	return cp;
+}
+
+--------------------------------------------------------------------------------------
+## [실습]
+* psh1.c 를 수정하여 계속해서 여러 명령어를 수행하는 프로그램을 완성하시오. 
+   - 강의자료실 프로그램을 수정할 것을 권고하나, 
+   - psh2.c 를 사용해도 됨
+   - 매번 본인의 이름이 출력이 되도록 수정함 (ex: Kyong Arg[%d]?)
+
+* 소스 코드와 실행화면 캡쳐해서 제출
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <signal.h>
+#include <sys/wait.h>
+
+#define MAXARGS 20
+#define ARGLEN 100
+
+void execute(char**);
+char * makestring();
+
+int main()
+{
+	char * arglist[MAXARGS+1];
+	int numargs;
+	char argbuf[ARGLEN];
+	
+	numargs = 0;
+	while (numargs<MAXARGS){
+		printf("Bokyung[%d]? ", numargs);
+		if(fgets(argbuf, ARGLEN, stdin)&& *argbuf!='\n'){
+			arglist[numargs++]=makestring(argbuf);
+		}
+		else{
+			if (numargs>0){
+				arglist[numargs]=NULL;
+				execute(arglist);
+				numargs=0;
+			}
+		}
+	}
+	return 0;
+}
+
+void execute (char * arglist[]){
+	int pid, exitstatus;
+	pid = fork();
+	switch(pid){
+		case -1:
+			perror("fork failed");
+			exit(1);
+		case 0: 
+			execvp(arglist[0], arglist);
+			perror("execvp failed ");
+			exit(1);
+		default:
+			while(wait(&exitstatus)!=pid);
+			printf("children exited with status %d, %d \n", exitstatus>>8, exitstatus&0377);
+	}
+}
+
+char * makestring(char *buf){
+	char *cp;
+	buf[strlen(buf)-1]= '\0';
+	cp = malloc(strlen(buf)+1);
+	if(cp == NULL){
+		fprintf(stderr, "no memory\n");
+		exit(1);
+	}
+	strcpy(cp, buf);
+	return cp;
+}

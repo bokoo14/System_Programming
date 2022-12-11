@@ -1,0 +1,446 @@
+# 11장 1122 강의 요약
+
+중간고사 마지막 문제 풀이
+semaphore
+
+barrier
+n개의 프로세스가 실행될때 barrier가 호출될때까지 기다렸다가 수행
+
+병렬 프로그램, 분산 시스템에서 필요한 시스템
+
+barrier라는 동기화 도구 -> signal handler를 사용하여 구현하라
+
+각 프로그램은 pid를 모두 안다고 가정
+도착하면 나 도착했다를 다른 사람들에게 알려야 한다
+SIGUSR를 보내서 알려야 한다
+
+도착한 시그널의 갯수가 n-1개가 안되면 계속 기다리는 ..
+
+### sigtest.c
+#include <stdio.h>
+#include <signal.h>
+
+int cnt =0;
+int pnum;
+int pids[10]; 
+
+
+void my_sig_handler(int signum){
+	printf(“signum = %d \n”, signum);
+	cnt ++;
+	//printf(“cnt = %d \n”, cnt);
+}
+
+void barrier(){
+	int i;
+	for (i=0; i<pnum -1; i++){ //도착을 했으니까 다른 애들한테 SIGUSR1을 보냄
+		kill(pids[i], SIGUSR1); // 시그널을 보냄
+	}
+
+	// n개의 프로세스가 barrier를 호출
+    // 내가 몇 개를 받았는지는 cnt값이 기록 (다른 애들로부터 받은 시그널의 수가 n-1개가 될 때까지..)
+	while (cnt<pnum-1){
+		pause(); //cpu를 안잡아먹고 다음 시그널이 발생할 때까지 기다림
+	}
+
+    // 다음 barrier함수호출을 위해 cnt초기화
+	cnt=0; 
+}
+
+void work(int sec){
+	int i, j, k;
+	int sum = 0;
+	for (i =0; i<sec; i++){
+		for (j =0; j<500; j++){
+			for (k=0; k<1000000; k++){
+				sum++;
+			}
+		}
+	}
+}
+
+int main(){
+	int i, work_t;
+	printf("pid = %d \n", getpid());
+	signal (SIGUSR, my_sig_handler);
+
+	printf("Enter the number of processes : ");
+	scanf("%d", &pnum);
+	srand(time(NULL));
+
+	for (i =0; i<pnum-1 ;i++){ // 상대방의 pid 입력
+		printf("Enter %d process id : ", i);
+		scanf("%d", &pids[i]);
+	}
+
+	while(1){
+		work_t = srand() % 10 +1;
+		printf("Working for %d secs ... \n", work_t);
+		work(work_t);
+		printf("             Done\n");
+		printf("");
+		barrier();
+	}
+}
+
+----------------------------------------------------------------
+## IPC (Inter-Process Communication)
+IPC: 두 프로세스 간의 통신하는 방법
+
+일반적으로 두개의 프로세스 사이에 데이터를 주고 받는 두 가지 방법 
+- message 기반
+: fifo처럼 메세지를 send, receive
+ 박스에 메세지를 쓰면 읽는 사람이 receive해서 받음
+- 공유 메모리 기반
+: 변수 (int x;)를 선언
+ 메모리를 정하고 하나는 쓰고, 하나는 읽기
+
+ipcs 명령어
+ipcs: message queue, shared memory segment, semaphore array가 보임
+ipcs -q : message queue만 보여줌
+ipcrm -q 2 : mspid=2인 메세지 큐를 지움
+
+----------------------------------------------------------------
+### msgsend.c
+// 메세지를 보내는 프로그램
+#include <stdio.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
+#include <sys/types.h>
+#include <string.h> 
+
+int main ()
+{
+	int msgqid;
+	key_t key; // 메세지 큐의 고유한 아이디
+	char buf[100];
+
+	key = 1234;
+	msgqid = msgget (key, IPC_CREAT | 0666); // 새로운 큐가 만들어짐
+	printf ("msgqid = %d \n", msgqid);
+	printf ("Enter a string to send : ");
+	gets (buf);
+	msgsnd (msgqid, buf, strlen(buf) + 1, 0); //msgqid에 buf를 보내기
+}
+
+### msgrcv.c
+// 메세지를 받는 프로그램
+#include <stdio.h>
+#include <sys/msg.h>
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <string.h> 
+
+int main ()
+{
+	int msgqid, nread;
+	key_t key;
+	char buf[100];
+
+	key = 1234;
+	msgqid = msgget (key, IPC_CREAT | 0666);
+	printf ("msgqid = %d \n", msgqid);
+	nread = msgrcv (msgqid, buf, 100, 0, 0); //메세지를 가져옴
+	printf ("nread = %d, buf =[%s] \n", nread, buf);
+}
+
+----------------------------------------------------------------
+### msgsend2.c
+// 다른 데이터타입으로 메시지 보내는 프로그램 -> string, int 보내기
+#include <stdio.h>
+#include <sys/msg.h>
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <string.h> 
+
+int main ()
+{
+	int msgqid;
+	key_t key;
+	char buf[100];
+	int data;
+
+	key = 1234;
+	msgqid = msgget (key, IPC_CREAT | 0666); //새로운 큐 만들기
+	printf ("msgqpid = %d \n", msgqid);
+
+	printf ("Enter a string to send : ");
+	gets (buf);
+	msgsnd (msgqid, buf, strlen(buf) + 1, 0); //string 메시지 보내기 (배열의 이름 자체가 포인터이므로 배열의 이름만 쓰면 됨)
+
+	printf ("Enter an integer to send : ");
+	scanf ("%d", &data);
+	msgsnd (msgqid, &data, sizeof(int), 0); //int 메시지 보내기 (int의 주소를 보내줘야 함)
+}
+
+### msgrcv2.c
+// 다른 데이터타입으로 메시지 받는 프로그램 -> string, int 읽기
+#include <stdio.h>
+#include <sys/msg.h>
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <string.h> 
+
+int main(){
+	key_t key = 1234;
+	int msgqid;
+	int nread;
+	char buf[100];
+	int data;
+
+	msgqid = msgget(key, IPC_CREAT | 0666);
+	printf("msgqid = %d \n", msgqid);
+	nread = msgrcv(msgqid, buf, 100, 0, 0);
+	nread = msgrcv(msgqid, &data, sizeof(int), 0, 0);
+	printf("nread %d buf = [%s] data = [%d] \n", nread, buf, data);
+}
+
+----------------------------------------------------------------
+메세지 큐 방식 - 동기화됨
+보낸 순서대로 읽으면 없어짐
+p1이 send
+p2가 receive
+
+shm 방식 - 시간 순으로 출력함
+컴퓨터가 꺼지지 않는 이상, 공유 메모리를 해지하지 않는 이상 os영역에 계속 있음
+새로 쓰면 덮어써져서 제일 마지막에 쓴 값만 읽을 수 있음
+
+ipcs : 현재 실행 중인 ipc의 상태들을 보여줌
+ipcs -q : 큐를 볼 수 있음
+ipcs -m : shared memory를 볼 수 있음
+
+ipcrm -q 262144(ID) : ipc의 큐를 삭제함
+ipcrm -q 262145(ID) : ipc의 큐를 삭제함
+
+----------------------------------------------------------------
+## shared memory
+
+
+### shmwrite.c
+// 공유 메모리에 쓰기
+#include <stdio.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/types.h>
+#include <string.h>
+
+int main(){
+	key_t key = 1234;
+	int shmid;
+	char *shmaddr;
+	char buf[100];
+
+	shmid = shmget(key, 1024, IPC_CREAT | 0666); // shared memory 만들기 (key, byte수, 없으면 생성하라는 옵션 | permission)
+	printf("shmid = %d \n", shmid);
+
+	shmaddr = shmat (shmid, NULL, 0); // shared memory를 attach. shmaddr주소의 메모리에 1024byte만큼 attach
+	printf("shmaddr = %p \n", shmaddr);
+
+	printf("Enter a string to write : ");
+	gets(buf);
+	strcpy(shmaddr, buf); //shared memory에 씀
+
+	shmdt(shmaddr); // 다 쓰면 돌려줌
+}
+
+
+### shmread.c
+// 공유 메모리 읽기
+#include <stdio.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/types.h>
+#include <string.h>
+
+int main(){
+	key_t key = 1234;
+	int shmid;
+	char *shmaddr;
+	char buf[100];
+
+	shmid = shmget(key, 1024, IPC_CREAT | 0666);
+	printf("shmid = %d \n", shmid);
+
+	shmaddr = shmat (shmid, NULL, 0);
+	printf("shmaddr = %p \n", shmaddr);
+
+	strcpy(buf,shmaddr); // shmaddr에 있는 내용을 buf로 copy
+	printf("buf = [%s]\n", buf);
+
+	shmdt(shmaddr);
+}
+
+----------------------------------------------------------------
+### shmwrite2.c
+// shared memory에 int형으로 쓰기
+#include <stdio.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/types.h>
+
+int main ()
+{
+	int shmid;
+	int data;
+	char *shmaddr;
+	key_t key = 1235;
+
+	shmid = shmget (key, sizeof(int), IPC_CREAT | 0666);
+	printf ("shmid = %d \n", shmid);
+
+	shmaddr = shmat (shmid, NULL, 0); //변수의 주소
+	printf ("shmaddr = %p \n", shmaddr);
+
+	printf ("Enter an integer to write: ");
+	scanf ("%d", &data);
+
+	*((int*)shmaddr) = data; //int형으로 쓰려면 -> shmaddr를 int형으로 type casting후, 거기에 써야 하므로, *를 붙여줌
+
+	shmdt (shmaddr);
+}
+
+### shmread2.c
+// shared memory에서 int형 메모리 읽기
+#include <stdio.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/types.h>
+
+int main ()
+{
+	int shmid;
+	int data;
+	char *shmaddr;
+	key_t key = 1235;
+
+	shmid = shmget (key, sizeof(int), IPC_CREAT | 0666);
+	printf ("shmid = %d \n", shmid);
+
+	shmaddr = shmat (shmid, NULL, 0);
+	printf ("shmaddr = %p \n", shmaddr);
+
+	data = *((int*)shmaddr);
+	printf ("data = %d \n", data);
+
+	shmdt (shmaddr);
+}
+
+----------------------------------------------------------------
+## [실습]
+(1) mesg queue 이용한 메시지 전달하기
+  - program A
+   + 키보드로 입력받은 문자열을 program B에 전달하고, program B가 보내는 문자열을 기다린다. 
+   + 반든 문자열을 출력한다. 
+   + 이 과정을 "end"를 입력할 때까지 반복한다. 
+  - program B
+   + program A로부터 문자열을 기다린다.
+   + 받은 문자열을 출력하고, 새로운 문자열을 만든다. ("예: strcat을 사용해서 msg + "이름")
+   + 새로 만든 문자열을 program A에게 전송한다. 
+   + 이 과정을 program A가 "end"를 받을 때까지 반복한다. 
+ 
+(2) 제출물 
+  - 두 개의 프로그램 소스 코드
+  - 실행화면 캡쳐한 이미지 파일
+
+### A.c
+#include <stdio.h>
+#include <fcntl.h>
+#include <string.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
+#include <sys/types.h>
+#include <string.h> 
+
+//program A2
+int main(){
+	// A
+	int msgqid;
+	key_t key;
+	char buf[100];
+
+	// B
+	int nread2;
+	int msgqid2;
+	key_t key2;
+	char buf2[100];
+
+	key = 1234;
+	msgqid = msgget (key, IPC_CREAT | 0666);
+
+	key2 = 1235;
+	msgqid2 = msgget (key2, IPC_CREAT | 0666);
+	
+	while(1){
+		// program A : key = 1234에 쓰기
+		printf("This is Program1\n");
+		//printf ("msgqpid = %d \n", msgqid);
+		printf ("Enter a string to send in program A: ");
+		gets (buf);
+		msgsnd (msgqid, buf, strlen(buf) + 1, 0);
+		if (!strcmp(buf, "end")){exit(0);}
+
+
+		// program B : key = 1235에서 읽기
+		printf("This is Program2\n");
+		//printf ("msgqpid2 = %d \n", msgqid2);
+		nread2 = msgrcv (msgqid2, buf2, 100, 0, 0);
+		printf ("nread = %d, buf =[%s] \n", nread2, buf2);
+
+	}
+
+}
+
+### B.c
+#include <stdio.h>
+#include <fcntl.h>
+#include <string.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
+#include <sys/types.h>
+#include <string.h> 
+
+
+//program B2
+int main(){
+	// B
+	int msgqid;
+	key_t key;
+	char buf[100];
+
+	// A
+	int nread2;
+	int msgqid2;
+	key_t key2;
+	char buf2[100];
+
+	key2 = 1234;
+	msgqid2 = msgget (key2, IPC_CREAT | 0666);
+
+	key = 1235;
+	msgqid = msgget (key, IPC_CREAT | 0666);
+	
+	
+	while(1){
+		// program B : key = 1234에서 읽기
+		printf("This is Program1\n");
+
+		//printf ("msgqpid2 = %d \n", msgqid2);
+		nread2 = msgrcv (msgqid2, buf2, 100, 0, 0);
+		printf ("nread = %d, buf =[%s] \n", nread2, buf2);
+		strcat(buf2, "bokyung");
+		printf ("nread = %d, buf =[%s] \n", nread2, buf2);
+
+
+		// program B : key = 1235에 쓰기
+		printf("This is Program2\n");
+		//printf ("msgqpid = %d \n", msgqid);
+		msgsnd (msgqid, buf2, strlen(buf2) + 1, 0); //문자열+bokyung보내기
+
+	}
+
+}
+
